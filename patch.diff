@@ -1,0 +1,241 @@
+diff --git a/src/objects/flying_enemy.cpp b/src/objects/flying_enemy.cpp
+index 6d998ac87ed61f5a32f81f17ced8b632188306a4..f3db8d63f4afbd2f5265854b687f644a380327b2 100644
+--- a/src/objects/flying_enemy.cpp
++++ b/src/objects/flying_enemy.cpp
+@@ -1,53 +1,69 @@
+ #include "flying_enemy.hpp"
+ 
+ #include <cmath>
+ 
+ using biv::FlyingEnemy;
+ 
+ FlyingEnemy::FlyingEnemy(const Coord& top_left, const int width, const int height,
+     const float left_bound, const float right_bound
+ )
+-    : Enemy(top_left, width, height), left_bound(left_bound), right_bound(right_bound) {}
++    : RectMapMovableAdapter(top_left, width, height), left_bound(left_bound), right_bound(right_bound) {
++    vspeed = 0;
++    hspeed = 0.2f;
++}
++
++biv::Rect FlyingEnemy::get_rect() const noexcept {
++    return {top_left, width, height};
++}
++
++biv::Speed FlyingEnemy::get_speed() const noexcept {
++    return {vspeed, hspeed};
++}
+ 
+ void FlyingEnemy::process_mario_collision(Collisionable* mario) noexcept {
+     mario->kill();
+ }
+ 
+ void FlyingEnemy::move_horizontally() noexcept {
+     const float next_x = top_left.x + hspeed;
+ 
+     if (next_x < left_bound) {
+         top_left.x = left_bound;
+         hspeed = std::abs(hspeed);
+     } else if (next_x + width > right_bound) {
+         top_left.x = right_bound - width;
+         hspeed = -std::abs(hspeed);
+     } else {
+         top_left.x = next_x;
+     }
+ }
+ 
+ void FlyingEnemy::move_vertically() noexcept {
+     static constexpr float OSCILLATION_SPEED = 0.08f;
+     static constexpr float OSCILLATION_AMPLITUDE = 2.0f;
+ 
+     const float previous_offset = std::sin(oscillation_phase) * OSCILLATION_AMPLITUDE;
+     oscillation_phase += OSCILLATION_SPEED;
+     const float new_offset = std::sin(oscillation_phase) * OSCILLATION_AMPLITUDE;
+ 
+     top_left.y += new_offset - previous_offset;
+ }
+ 
+ void FlyingEnemy::move_map_left() noexcept {
+     RectMapMovableAdapter::move_map_left();
+     left_bound -= MapMovable::MAP_STEP;
+     right_bound -= MapMovable::MAP_STEP;
+ }
+ 
+ void FlyingEnemy::move_map_right() noexcept {
+     RectMapMovableAdapter::move_map_right();
+     left_bound += MapMovable::MAP_STEP;
+     right_bound += MapMovable::MAP_STEP;
+ }
+ 
+-void FlyingEnemy::process_vertical_static_collision(Rect*) noexcept {}
+\ No newline at end of file
++void FlyingEnemy::process_horizontal_static_collision(Rect* obj) noexcept {
++    hspeed = -hspeed;
++    move_horizontally();
++}
++
++void FlyingEnemy::process_vertical_static_collision(Rect*) noexcept {}
+diff --git a/src/objects/flying_enemy.hpp b/src/objects/flying_enemy.hpp
+index 689c11042b160f9b418a91d45a068c2ee0da0bfe..d4b6915a89cdf88cd82131ffe6650f2ac13d4ae6 100644
+--- a/src/objects/flying_enemy.hpp
++++ b/src/objects/flying_enemy.hpp
+@@ -1,23 +1,29 @@
+ #pragma once
+ 
+-#include "enemy.hpp"
++#include "collisionable.hpp"
++#include "movable.hpp"
++#include "rect_map_movable_adapter.hpp"
+ 
+ namespace biv {
+-    class FlyingEnemy : public Enemy {
++    class FlyingEnemy : public RectMapMovableAdapter, public Movable, public Collisionable {
+             public:
+                 FlyingEnemy(const Coord& top_left, const int width, const int height,
+                 const float left_bound, const float right_bound);
+ 
++                Rect get_rect() const noexcept override;
++                Speed get_speed() const noexcept override;
++
+                 void move_horizontally() noexcept override;
+                 void move_vertically() noexcept override;
+                 void move_map_left() noexcept override;
+                 void move_map_right() noexcept override;
++                void process_horizontal_static_collision(Rect* obj) noexcept override;
+                 void process_vertical_static_collision(Rect*) noexcept override;
+                 void process_mario_collision(Collisionable*) noexcept override;
+ 
+             private:
+                 float left_bound;
+                 float right_bound;
+                 float oscillation_phase = 0.0f;
+     };
+-}
+\ No newline at end of file
++}
+diff --git a/src/objects/jumping_enemy.cpp b/src/objects/jumping_enemy.cpp
+index 387f11124b45790cb259ecbfe969d73959e5809d..dcf620481db33f58972b3f48f473e18b3018cfb0 100644
+--- a/src/objects/jumping_enemy.cpp
++++ b/src/objects/jumping_enemy.cpp
+@@ -1,45 +1,80 @@
+ #include "jumping_enemy.hpp"
+ 
+ using biv::JumpingEnemy;
+ 
+ JumpingEnemy::JumpingEnemy(const Coord& top_left, const int width, const int height)
+-    : Enemy(top_left, width, height) {}
++    : RectMapMovableAdapter(top_left, width, height) {
++    vspeed = 0;
++    hspeed = 0.2f;
++}
++
++biv::Rect JumpingEnemy::get_rect() const noexcept {
++    return {top_left, width, height};
++}
++
++biv::Speed JumpingEnemy::get_speed() const noexcept {
++    return {vspeed, hspeed};
++}
+ 
+ void JumpingEnemy::move_vertically() noexcept {
+     if (is_grounded_) {
+         jump();
+         is_grounded_ = false;
+     }
+ 
+     Movable::move_vertically();
+ }
+ 
+ void JumpingEnemy::move_horizontally() noexcept {
+     if (ground_ != nullptr) {
+         float next_left = top_left.x + hspeed;
+         float next_right = next_left + width;
+ 
+         if (next_left < ground_->get_left() || next_right > ground_->get_right()) {
+             hspeed = -hspeed;
+             next_left = top_left.x + hspeed;
+             next_right = next_left + width;
+ 
+             if (next_left < ground_->get_left()) {
+                 top_left.x = ground_->get_left();
+             } else if (next_right > ground_->get_right()) {
+                 top_left.x = ground_->get_right() - width;
+             }
+         }
+-        }
++    }
++
++    Movable::move_horizontally();
++}
+ 
+-        Movable::move_horizontally();
++void JumpingEnemy::process_horizontal_static_collision(Rect* obj) noexcept {
++    hspeed = -hspeed;
++    move_horizontally();
++}
++
++void JumpingEnemy::process_mario_collision(Collisionable* mario) noexcept {
++    if (mario->get_speed().v > 0 && mario->get_speed().v != V_ACCELERATION) {
++        kill();
++    } else {
++        mario->kill();
++    }
+ }
+ 
+ void JumpingEnemy::process_vertical_static_collision(Rect* obj) noexcept {
+     const bool was_falling = vspeed > 0;
+-    Enemy::process_vertical_static_collision(obj);
++    top_left.x += hspeed;
++    if (!has_collision(obj)) {
++        process_horizontal_static_collision(obj);
++    } else {
++        top_left.x -= hspeed;
++    }
++
++    if (vspeed > 0) {
++        top_left.y -= vspeed;
++        vspeed = 0;
++    }
++
+     if (was_falling) {
+         is_grounded_ = true;
+         ground_ = obj;
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/objects/jumping_enemy.hpp b/src/objects/jumping_enemy.hpp
+index 5c8fed135e18e95c7844bde1541d05d7997a3bc0..e54b082ebcd628aba80e673144f4619117a7197b 100644
+--- a/src/objects/jumping_enemy.hpp
++++ b/src/objects/jumping_enemy.hpp
+@@ -1,18 +1,26 @@
+ #pragma once
+ 
+-#include "enemy.hpp"
++#include "collisionable.hpp"
++#include "movable.hpp"
++#include "rect_map_movable_adapter.hpp"
+ 
+ namespace biv {
+-    class JumpingEnemy : public Enemy {
++    class JumpingEnemy : public RectMapMovableAdapter, public Movable, public Collisionable {
+         public:
+             JumpingEnemy(const Coord& top_left, const int width, const int height);
+ 
++            Rect get_rect() const noexcept override;
++            Speed get_speed() const noexcept override;
++
+             void move_vertically() noexcept override;
+             void move_horizontally() noexcept override;
++
++            void process_horizontal_static_collision(Rect* obj) noexcept override;
++            void process_mario_collision(Collisionable* mario) noexcept override;
+             void process_vertical_static_collision(Rect* obj) noexcept override;
+ 
+         private:
+             bool is_grounded_ = false;
+             Rect* ground_ = nullptr;
+     };
+-}
+\ No newline at end of file
++}
